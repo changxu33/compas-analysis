@@ -1,0 +1,138 @@
+---
+title: "R Notebook"
+output: html_notebook
+ ---
+```{r}
+library(dplyr)
+library(ggplot2)
+raw_data <- read.csv("./compas-scores-two-years.csv")
+head(raw_data)
+nrow(raw_data)
+```
+
+```{r}
+df <- dplyr::select(raw_data, age, c_charge_degree, race, age_cat, score_text, sex, priors_count, 
+                    days_b_screening_arrest, decile_score, is_recid, two_year_recid, c_jail_in, c_jail_out) %>% 
+        filter(days_b_screening_arrest <= 30) %>%
+        filter(days_b_screening_arrest >= -30) %>%
+        filter(is_recid != -1) %>%
+        filter(c_charge_degree != "O") %>%
+        filter(score_text != 'N/A')
+nrow(df)
+```
+
+```{r}
+df$length_of_stay <- as.numeric(as.Date(df$c_jail_out) - as.Date(df$c_jail_in))
+cor(df$length_of_stay, df$decile_score)
+```
+
+```{r}
+summary(df$age_cat)
+summary(df$race)
+summary(df$score_text)
+xtabs(~ sex + race, data=df)
+summary(df$sex)
+# Low<-2, High<-3,media<-1
+#df$score_text<-as.numeric(df$score_text)
+```
+
+```{r}
+df.race<-dplyr::select(df,race,score_text)
+head(df.race)
+count<-table(df.race)
+count<-as.data.frame(count)
+ggplot(data=count,aes(x=score_text,y=Freq,fill=race,label=Freq))+
+  geom_bar(stat="identity")+
+  ggtitle("race and score text")+xlab("sore")+ylab('Count')+
+  theme_minimal()
+```
+
+```{r}
+ggplot(count, aes(score_text , Freq, fill = race)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~race,ncol = 1, scales = "free_y")+
+  coord_flip()
+```
+
+```{r}
+raw_data <- read.csv("./compas-scores-two-years-violent.csv")
+df <- dplyr::select(raw_data, age, c_charge_degree, race, age_cat, v_score_text, sex, priors_count, 
+                    days_b_screening_arrest, v_decile_score, is_recid, two_year_recid) %>% 
+        filter(days_b_screening_arrest <= 30) %>%
+        filter(days_b_screening_arrest >= -30) %>% 
+        filter(is_recid != -1) %>%
+        filter(c_charge_degree != "O") %>%
+        filter(v_score_text != 'N/A')
+df.race<-dplyr::select(df,race,v_score_text)
+head(df.race)
+count<-table(df.race)
+count<-as.data.frame(count)
+ggplot(data=count,aes(x=v_score_text,y=Freq,fill=race,label=Freq))+
+  geom_bar(stat="identity")+
+  ggtitle("race and volient score text")+xlab("sore")+ylab('Count')+
+  theme_minimal()
+```
+
+```{r}
+ggplot(count, aes(v_score_text , Freq, fill = race)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~race,ncol = 1, scales = "free_y")+
+  coord_flip()
+```
+
+```{r}
+library(grid)
+library(gridExtra)
+pblack <- ggplot(data=filter(df, race =="African-American"), aes(ordered(decile_score))) + 
+          geom_bar() + xlab("Decile Score") +
+          ylim(0, 650) + ggtitle("Black Defendant's Decile Scores")
+pwhite <- ggplot(data=filter(df, race =="Caucasian"), aes(ordered(decile_score))) + 
+          geom_bar() + xlab("Decile Score") +
+          ylim(0, 650) + ggtitle("White Defendant's Decile Scores")
+grid.arrange(pblack, pwhite,  ncol = 2)
+```
+
+
+```{r}
+xtabs(~ decile_score + race, data=df)
+```
+
+```{r}
+df <- mutate(df, crime_factor = factor(c_charge_degree)) %>%
+      mutate(age_factor = as.factor(age_cat)) %>%
+      within(age_factor <- relevel(age_factor, ref = 1)) %>%
+      mutate(race_factor = factor(race)) %>%
+      within(race_factor <- relevel(race_factor, ref = 3)) %>%
+      mutate(gender_factor = factor(sex, labels= c("Female","Male"))) %>%
+      within(gender_factor <- relevel(gender_factor, ref = 2)) %>%
+      mutate(score_factor = factor(score_text != "Low", labels = c("LowScore","HighScore")))
+model <- glm(score_factor ~ gender_factor + age_factor + race_factor +
+                            priors_count + crime_factor + two_year_recid, family="binomial", data=df)
+summary(model)
+```
+
+```{r}
+library(survival)
+library(ggfortify)
+
+data <- filter(filter(read.csv("./cox-parsed.csv"), score_text != "N/A"), end > start) %>%
+        mutate(race_factor = factor(race,
+                                  labels = c("African-American", 
+                                             "Asian",
+                                             "Caucasian", 
+                                             "Hispanic", 
+                                             "Native American",
+                                             "Other"))) %>%
+        within(race_factor <- relevel(race_factor, ref = 3)) %>%
+        mutate(score_factor = factor(score_text)) %>%
+        within(score_factor <- relevel(score_factor, ref=2))
+
+grp <- data[!duplicated(data$id),]
+nrow(grp)
+```
+
+```{r}
+f <- Surv(start, end, event, type="counting") ~ score_factor
+model <- coxph(f, data=data)
+summary(model)
+```
